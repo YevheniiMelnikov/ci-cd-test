@@ -37,11 +37,25 @@ jobs:
 
       - name: Deploy via SSH to localhost
         run: |
-          rsync -az --delete ./ localhost:~/toy-app/
-          ssh localhost "
-            cd ~/toy-app &&
-            docker compose down || true &&
-            docker compose build &&
-            docker compose up -d &&
-            curl -fsS http://localhost:8000/health
+          rsync -az --delete \
+            -e "ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10" \
+            ./ localhost:~/toy-app/
+      
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o StrictHostKeyChecking=yes localhost "
+            set -e
+            cd ~/toy-app
+            docker compose down || true
+            docker compose build
+            docker compose up -d --wait || true
+            for i in {1..30}; do
+              if curl -fsS http://localhost:8000/health >/dev/null; then
+                echo 'health: OK'
+                exit 0
+              fi
+              sleep 2
+            done
+            echo 'health: FAIL, dump logs:'
+            docker compose ps
+            docker compose logs --no-color --tail=200
+            exit 1
           "
