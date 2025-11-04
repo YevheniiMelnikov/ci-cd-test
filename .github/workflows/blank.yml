@@ -1,0 +1,50 @@
+name: CI/CD Demo (with SSH localhost)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  ci:
+    name: Run lint and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Ruff
+        run: pipx install ruff
+
+      - name: Lint code
+        run: ruff .
+
+      - name: Test in Docker
+        run: |
+          docker build -t toy-app:test .
+          docker run --rm toy-app:test pytest -q
+
+  cd:
+    name: Deploy via SSH to localhost
+    needs: ci
+    runs-on: [self-hosted, linux, x64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy via SSH to localhost
+        run: |
+          rsync -az --delete ./ localhost:~/toy-app/
+          ssh localhost "
+            cd ~/toy-app &&
+            docker compose down || true &&
+            docker compose build &&
+            docker compose up -d &&
+            curl -fsS http://localhost:8000/health
+          "
