@@ -1,32 +1,32 @@
-name: ci-cd
+name: CI/CD Demo (self-hosted only)
 
 on:
   push:
     branches: [ main ]
+  pull_request:
 
 jobs:
-  ci:
-    runs-on: ubuntu-latest
+  ci_cd:
+    name: Lint, test and deploy (local runner)
+    runs-on: [self-hosted, linux, x64]
     steps:
       - uses: actions/checkout@v4
-      - name: Lint
+
+      - name: Install Ruff and Pytest
         run: |
-          pipx install ruff
-          ruff .
+          pip install --no-cache-dir ruff pytest docker
+
+      - name: Lint
+        run: ruff .
+
       - name: Test in Docker
         run: |
           docker build -t toy-app:test .
           docker run --rm toy-app:test pytest -q
 
-  cd:
-    needs: ci
-    runs-on: [self-hosted, linux, x64]
-    steps:
-      - uses: actions/checkout@v4
-
       - name: Setup SSH
         run: |
-          install -m 700 -d ~/.ssh
+          mkdir -p ~/.ssh
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
           echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
@@ -35,4 +35,10 @@ jobs:
       - name: Deploy via SSH to localhost
         run: |
           rsync -az --delete ./ localhost:~/toy-app/
-          ssh localhost "cd ~/toy-app && docker compose down || true && docker compose build && docker compose up -d && curl -fsS http://localhost:8000/health"
+          ssh localhost "
+            cd ~/toy-app &&
+            docker compose down || true &&
+            docker compose build &&
+            docker compose up -d &&
+            curl -fsS http://localhost:8000/health
+          "
