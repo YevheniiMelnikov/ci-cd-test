@@ -1,4 +1,4 @@
-name: CI/CD Demo (self-hosted only)
+name: CI/CD Demo (local, no-ssh)
 
 on:
   push:
@@ -18,7 +18,7 @@ jobs:
           pip install --no-cache-dir "ruff>=0.6" pytest docker
 
       - name: Lint
-        run: | 
+        run: |
           ruff check --fix .
           ruff format .
 
@@ -27,45 +27,21 @@ jobs:
           docker build -t toy-app:test .
           docker run --rm toy-app:test pytest -q
 
-      - name: Ensure sshd, host keys and auth
+      - name: Deploy locally (no SSH)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends openssh-server rsync
-          sudo systemctl enable --now ssh
-      
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-      
-          PUB="$(ssh-keygen -y -f ~/.ssh/id_ed25519_win)"
-          grep -q "$PUB" ~/.ssh/authorized_keys 2>/dev/null || echo "$PUB" >> ~/.ssh/authorized_keys
-          chmod 600 ~/.ssh/authorized_keys
-      
-          ssh-keyscan -H localhost 127.0.0.1 "$(hostname -f)" >> ~/.ssh/known_hosts 2>/dev/null || true
-          chmod 644 ~/.ssh/known_hosts
-      
-          # sanity-check: должен вывести 'ssh-ok' и выйти 0
-          ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=5 localhost 'echo ssh-ok'
+          docker compose down || true
+          docker compose build
+          docker compose up -d --wait || true
 
-      - name: Deploy via SSH to localhost
-        run: |
-          rsync -az --delete \
-            -e "ssh -i ~/.ssh/id_ed25519_win -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10" \
-            ./ localhost:~/toy-app/
-      
-          ssh -i ~/.ssh/id_ed25519_win -o BatchMode=yes -o StrictHostKeyChecking=yes localhost "
-            set -e
-            cd ~/toy-app
-            docker compose down || true
-            docker compose build
-            docker compose up -d --wait || true
-            for i in {1..30}; do
-              if curl -fsS http://localhost:8000/health >/dev/null; then
-                echo 'health: OK'; exit 0
-              fi
-              sleep 2
-            done
-            echo 'health: FAIL, dump logs:'
-            docker compose ps
-            docker compose logs --no-color --tail=200
-            exit 1
-          "
+          for i in {1..30}; do
+            if curl -fsS http://localhost:8000/health >/dev/null; then
+              echo "health: OK"
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "health: FAIL, dumping logs..."
+          docker compose ps
+          docker compose logs --no-color --tail=200
+          exit 1
